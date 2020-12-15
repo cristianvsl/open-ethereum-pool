@@ -4,15 +4,16 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/math"
 
-	"github.com/techievee/ethash-mining-pool/rpc"
-	"github.com/techievee/ethash-mining-pool/storage"
-	"github.com/techievee/ethash-mining-pool/util"
+	"github.com/etclabscore/open-etc-pool/rpc"
+	"github.com/etclabscore/open-etc-pool/storage"
+	"github.com/etclabscore/open-etc-pool/util"
 )
 
 type UnlockerConfig struct {
@@ -29,20 +30,13 @@ type UnlockerConfig struct {
 }
 
 const minDepth = 16
-const byzantiumHardForkHeight = 5000000
 
-var homesteadReward = math.MustParseBig256("3200000000000000000")
-var byzantiumReward = math.MustParseBig256("3200000000000000000")
+var constReward = math.MustParseBig256("3200000000000000000")
+var uncleReward = new(big.Int).Div(constReward, new(big.Int).SetInt64(32))
 
-var NewUncleReward = math.MustParseBig256("125000000000000000")
-
-// Donate 1% from pool fees to developers
-const donationFee = 2.0
-const donationAccount = "0xc8efe17161b98a5fd860e7e6e51d53083265d966"
-
-// Donate 1% from pool fees
-const donationFee2 = 1.0
-const donationAccount2 = "0xedfcd2078877a3d5f84d4e863433e897ee5128c3"
+// Donate 5% from pool fees to developers
+const donationFee = 0.0
+const donationAccount = ""
 
 type BlockUnlocker struct {
 	config   *UnlockerConfig
@@ -210,12 +204,14 @@ func matchCandidate(block *rpc.GetBlockReply, candidate *storage.BlockData) bool
 }
 
 func (u *BlockUnlocker) handleBlock(block *rpc.GetBlockReply, candidate *storage.BlockData) error {
+	// Initial 5 Ether static reward
+	reward := new(big.Int).Set(constReward)
+
 	correctHeight, err := strconv.ParseInt(strings.Replace(block.Number, "0x", "", -1), 16, 64)
 	if err != nil {
 		return err
 	}
 	candidate.Height = correctHeight
-	reward := getConstReward(candidate.Height)
 
 	// Add TX fees
 	extraTxReward, err := u.getExtraRewardForTx(block)
@@ -229,7 +225,6 @@ func (u *BlockUnlocker) handleBlock(block *rpc.GetBlockReply, candidate *storage
 	}
 
 	// Add reward for including uncles
-	uncleReward := getRewardForUncle(candidate.Height)
 	rewardForUncles := big.NewInt(0).Mul(uncleReward, big.NewInt(int64(len(block.Uncles))))
 	reward.Add(reward, rewardForUncles)
 
@@ -256,6 +251,7 @@ func handleUncle(height int64, uncle *rpc.GetBlockReply, candidate *storage.Bloc
 func (u *BlockUnlocker) unlockPendingBlocks() {
 	if u.halt {
 		log.Println("Unlocking suspended due to last critical error:", u.lastFail)
+		os.Exit(1)
 		return
 	}
 
@@ -339,20 +335,11 @@ func (u *BlockUnlocker) unlockPendingBlocks() {
 		entries := []string{logEntry}
 		for login, reward := range roundRewards {
 			entries = append(entries, fmt.Sprintf("\tREWARD %v: %v: %v Shannon", block.RoundKey(), login, reward))
-
 			per := new(big.Rat)
 			if val, ok := percents[login]; ok {
 				per = val
 			}
-
-			err = u.backend.WriteReward(login, reward, per, true, block)
-			if err != nil {
-				u.halt = true
-				u.lastFail = err
-				log.Printf("Failed to Write rewards for Mature Block of round %v: %v", block.RoundKey(), err)
-				return
-			}
-
+			u.backend.WriteReward(login, reward, per, true, block)
 		}
 		log.Println(strings.Join(entries, "\n"))
 	}
@@ -373,7 +360,7 @@ func (u *BlockUnlocker) unlockAndCreditMiners() {
 
 	current, err := u.rpc.GetPendingBlock()
 	if err != nil {
-		//u.halt = true
+		u.halt = true
 		u.lastFail = err
 		log.Printf("Unable to get current blockchain height from node: %v", err)
 		return
@@ -452,18 +439,11 @@ func (u *BlockUnlocker) unlockAndCreditMiners() {
 		entries := []string{logEntry}
 		for login, reward := range roundRewards {
 			entries = append(entries, fmt.Sprintf("\tREWARD %v: %v: %v Shannon", block.RoundKey(), login, reward))
-
 			per := new(big.Rat)
 			if val, ok := percents[login]; ok {
 				per = val
 			}
-			err = u.backend.WriteReward(login, reward, per, false, block)
-			if err != nil {
-				u.halt = true
-				u.lastFail = err
-				log.Printf("Failed to Write rewards for Immature Block of round %v: %v", block.RoundKey(), err)
-				return
-			}
+			u.backend.WriteReward(login, reward, per, false, block)
 		}
 		log.Println(strings.Join(entries, "\n"))
 	}
@@ -539,25 +519,10 @@ func weiToShannonInt64(wei *big.Rat) int64 {
 	return value
 }
 
-func getConstReward(height int64) *big.Int {
-	if height >= byzantiumHardForkHeight {
-		return new(big.Int).Set(byzantiumReward)
-	}
-	return new(big.Int).Set(homesteadReward)
-}
-
-func getRewardForUncle(height int64) *big.Int {
-	reward := getConstReward(height)
-	return new(big.Int).Div(reward, new(big.Int).SetInt64(32))
-}
-
 func getUncleReward(uHeight, height int64) *big.Int {
-	//reward := getConstReward(height)
-	//k := height - uHeight
-	//reward.Mul(big.NewInt(8-k), reward)
-	//reward.Div(reward, big.NewInt(8))
-	return new(big.Int).Set(NewUncleReward)
-
+	reward := new(big.Int).Set(constReward)
+	reward.Div(reward, big.NewInt(32))
+	return reward
 }
 
 func (u *BlockUnlocker) getExtraRewardForTx(block *rpc.GetBlockReply) (*big.Int, error) {
