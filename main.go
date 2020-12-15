@@ -1,3 +1,5 @@
+// +build go1.9
+
 package main
 
 import (
@@ -11,11 +13,10 @@ import (
 
 	"github.com/yvasiyarov/gorelic"
 
-	"github.com/techievee/ethash-mining-pool/api"
-	"github.com/techievee/ethash-mining-pool/exchange"
-	"github.com/techievee/ethash-mining-pool/payouts"
-	"github.com/techievee/ethash-mining-pool/proxy"
-	"github.com/techievee/ethash-mining-pool/storage"
+	"github.com/etclabscore/open-etc-pool/api"
+	"github.com/etclabscore/open-etc-pool/payouts"
+	"github.com/etclabscore/open-etc-pool/proxy"
+	"github.com/etclabscore/open-etc-pool/storage"
 )
 
 var cfg proxy.Config
@@ -38,11 +39,6 @@ func startBlockUnlocker() {
 
 func startPayoutsProcessor() {
 	u := payouts.NewPayoutsProcessor(&cfg.Payouts, backend)
-	u.Start()
-}
-
-func startExchangeProcessor() {
-	u := exchange.StartExchangeProcessor(&cfg.Exchange, backend)
 	u.Start()
 }
 
@@ -86,11 +82,10 @@ func main() {
 
 	startNewrelic()
 
-	backend = storage.NewRedisClient(&cfg.Redis, cfg.Coin, cfg.Pplns, cfg.CoinName)
+	backend = storage.NewRedisClient(&cfg.Redis, cfg.Coin, cfg.Pplns)
 	pong, err := backend.Check()
 	if err != nil {
 		log.Printf("Can't establish connection to backend: %v", err)
-		//os.Exit(0)
 	} else {
 		log.Printf("Backend check reply: %v", pong)
 	}
@@ -107,11 +102,6 @@ func main() {
 	if cfg.Payouts.Enabled {
 		go startPayoutsProcessor()
 	}
-
-	if cfg.Exchange.Enabled {
-		go startExchangeProcessor()
-	}
-
 	quit := make(chan bool)
 	<-quit
 }
