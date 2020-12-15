@@ -12,9 +12,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/common/hexutil"
 
-	"github.com/techievee/ethash-mining-pool/util"
+	"github.com/etclabscore/open-etc-pool/util"
 )
 
 type RPCClient struct {
@@ -99,7 +99,7 @@ func (r *RPCClient) GetWork() ([]string, error) {
 }
 
 func (r *RPCClient) GetPendingBlock() (*GetBlockReplyPart, error) {
-	rpcResp, err := r.doPost(r.Url, "eth_getBlockByNumber", []interface{}{"pending", false})
+	rpcResp, err := r.doPost(r.Url, "eth_getBlockByNumber", []interface{}{"latest", true})
 	if err != nil {
 		return nil, err
 	}
@@ -177,7 +177,7 @@ func (r *RPCClient) GetBalance(address string) (*big.Int, error) {
 
 func (r *RPCClient) Sign(from string, s string) (string, error) {
 	hash := sha256.Sum256([]byte(s))
-	rpcResp, err := r.doPost(r.Url, "eth_sign", []string{from, common.ToHex(hash[:])})
+	rpcResp, err := r.doPost(r.Url, "eth_sign", []string{from, hexutil.Encode(hash[:])})
 	var reply string
 	if err != nil {
 		return reply, err
@@ -205,19 +205,6 @@ func (r *RPCClient) GetPeerCount() (int64, error) {
 	return strconv.ParseInt(strings.Replace(reply, "0x", "", -1), 16, 64)
 }
 
-func (r *RPCClient) GetGasPrice() (int64, error) {
-	rpcResp, err := r.doPost(r.Url, "eth_gasPrice", nil)
-	if err != nil {
-		return 0, err
-	}
-	var reply string
-	err = json.Unmarshal(*rpcResp.Result, &reply)
-	if err != nil {
-		return 0, err
-	}
-	return strconv.ParseInt(strings.Replace(reply, "0x", "", -1), 16, 64)
-}
-
 func (r *RPCClient) SendTransaction(from, to, gas, gasPrice, value string, autoGas bool) (string, error) {
 	params := map[string]string{
 		"from":  from,
@@ -228,7 +215,6 @@ func (r *RPCClient) SendTransaction(from, to, gas, gasPrice, value string, autoG
 		params["gas"] = gas
 		params["gasPrice"] = gasPrice
 	}
-
 	rpcResp, err := r.doPost(r.Url, "eth_sendTransaction", []interface{}{params})
 	var reply string
 	if err != nil {
